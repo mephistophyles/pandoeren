@@ -7,6 +7,7 @@ import {
   PANDOEREN_MODES,
   SUITS,
   bidLabel,
+  calledCardOptions,
   createDeck,
   dealCards,
   determineTrickWinner,
@@ -246,7 +247,7 @@ function App() {
                 Called card
                 <select value={deal.calledCardId ?? ''} onChange={(event) => setDeal((current) => ({ ...current, calledCardId: event.target.value }))}>
                   <option value="">No called card yet</option>
-                  {createDeck().map((card) => <option key={card.id} value={card.id}>{cardLabel(card)}</option>)}
+                  {calledCardOptions(deal.hands[deal.currentBidderId] ?? []).map((card) => <option key={card.id} value={card.id}>{cardLabel(card)}</option>)}
                 </select>
               </label>
               <button disabled={deal.currentBid.kind === 'numeric' && (!deal.trumpSuit || !deal.calledCardId)} onClick={beginPlay} type="button">Start play</button>

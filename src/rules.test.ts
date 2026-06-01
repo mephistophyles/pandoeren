@@ -3,6 +3,7 @@ import {
   type Card,
   type PlayedCard,
   PANDOEREN_MODES,
+  calledCardOptions,
   createDeck,
   dealCards,
   determineTrickWinner,
@@ -102,5 +103,18 @@ describe('Pandoeren rules foundation', () => {
     expect(options.map((option) => option.label)).toContain('match misere');
     expect(options.map((option) => option.label)).toContain('zwabber');
     expect(PANDOEREN_MODES.filter((mode) => mode.matchable).map((mode) => mode.id)).toEqual(['misere', 'misere-ouvert', 'praatje']);
+  });
+
+  it('excludes cards in the caller hand from called-card options', () => {
+    const callerHand: Card[] = [
+      { suit: 'clubs', rank: 'A', id: 'clubs-A' },
+      { suit: 'hearts', rank: 'J', id: 'hearts-J' },
+    ];
+
+    const options = calledCardOptions(callerHand, createDeck()).map((card) => card.id);
+
+    expect(options).not.toContain('clubs-A');
+    expect(options).not.toContain('hearts-J');
+    expect(options).toContain('spades-A');
   });
 });
