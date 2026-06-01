@@ -175,6 +175,11 @@ export function settleMisere(input: { miserePlayers: string[]; failedPlayers: st
   return ledger;
 }
 
+export function calledCardOptions(callerHand: Card[], deck: Card[] = createDeck()): Card[] {
+  const callerCardIds = new Set(callerHand.map((card) => card.id));
+  return deck.filter((card) => !callerCardIds.has(card.id));
+}
+
 export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }): Array<{ bid: Bid; label: string }> {
   if (input.current.kind === 'numeric') {
     const nextNumeric = input.current.amount + 10;
