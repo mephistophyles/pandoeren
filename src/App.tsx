@@ -47,6 +47,7 @@ type DealState = {
   pandoerenOpened: boolean;
   trumpSuit?: Suit;
   calledCardId?: string;
+  openRoem: number;
   declarerTeam: string[];
   defenders: string[];
   currentTrick: PlayedCard[];
@@ -85,6 +86,7 @@ function createDeal(dealerIndex: number): DealState {
     passedNumeric: [],
     passedDeal: [],
     pandoerenOpened: false,
+    openRoem: 0,
     declarerTeam: [opener.id],
     defenders: initialPlayers.filter((player) => player.id !== opener.id).map((player) => player.id),
     currentTrick: [],
@@ -189,15 +191,23 @@ function App() {
     const partnerId = contractUsesCalledCard(deal.currentBid) && deal.calledCardId ? Object.entries(deal.hands).find(([, hand]) => hand.some((card) => card.id === deal.calledCardId))?.[0] : undefined;
     const declarerTeam = partnerId && partnerId !== deal.currentBidderId ? [deal.currentBidderId, partnerId] : [deal.currentBidderId];
     const defenders = players.map((player) => player.id).filter((id) => !declarerTeam.includes(id));
-    setDeal((current) => ({
-      ...current,
-      phase: 'play',
-      trumpSuit: contractUsesTrump(current.currentBid) ? current.trumpSuit : undefined,
-      turnIndex: players.findIndex((player) => player.id === current.currentBidderId),
-      declarerTeam,
-      defenders,
-      log: [`${playerName(current.currentBidderId)} starts play${partnerId ? ` with ${playerName(partnerId)} as maat` : ''}.`, ...current.log],
-    }));
+    setDeal((current) => {
+      const openRoemAdjustment = contractScoresTrickPoints(current.currentBid) ? -current.openRoem : 0;
+      return {
+        ...current,
+        phase: 'play',
+        trumpSuit: contractUsesTrump(current.currentBid) ? current.trumpSuit : undefined,
+        turnIndex: players.findIndex((player) => player.id === current.currentBidderId),
+        declarerTeam,
+        defenders,
+        targetAdjustment: openRoemAdjustment,
+        log: [
+          `${playerName(current.currentBidderId)} starts play${partnerId ? ` with ${playerName(partnerId)} as maat` : ''}.`,
+          ...(current.openRoem ? [`Open roem declared by playing team: ${current.openRoem}; adjusts target by ${openRoemAdjustment}.`] : []),
+          ...current.log,
+        ],
+      };
+    });
   }
 
   function playCard(card: Card): void {
@@ -314,7 +324,9 @@ function App() {
           <p>Phase: {deal.phase}</p>
           <p>Trump: {usesTrump ? (deal.trumpSuit ?? 'not chosen') : 'none'}</p>
           <p>Called card: {usesCalledCard ? (selectedCalledCard ? cardLabel(selectedCalledCard) : 'not chosen') : 'none'}</p>
-{deal.phase === 'bidding' && (
+          <p>Open roem: {deal.openRoem}</p>
+          <p>Bid adjustment: {deal.targetAdjustment}</p>
+          {deal.phase === 'bidding' && (
             <div className="actions">
               <button onClick={passBid} type="button">Pass</button>
               {raiseOptions.slice(0, 8).map((option) => (
@@ -330,6 +342,18 @@ function App() {
                   <select value={deal.trumpSuit ?? ''} onChange={(event) => setDeal((current) => ({ ...current, trumpSuit: event.target.value as Suit }))}>
                     <option value="">Choose suit</option>
                     {SUITS.map((suit) => <option key={suit} value={suit}>{suit}</option>)}
+                  </select>
+                </label>
+              )}
+              {contractScoresTrickPoints(deal.currentBid) && (
+                <label>
+                  Open roem
+                  <select value={deal.openRoem} onChange={(event) => setDeal((current) => ({ ...current, openRoem: Number(event.target.value) }))}>
+                    <option value={0}>None</option>
+                    <option value={20}>20</option>
+                    <option value={40}>40</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
                   </select>
                 </label>
               )}

@@ -160,12 +160,18 @@ describe('Pandoeren rules foundation', () => {
     });
   });
 
-  it('settles prive and zwabber as one payment to or from the opposing side, not once per opponent', () => {
+  it('settles 1-vs-3 modes as a full payout per opponent and zwabber as one side payment', () => {
     expect(settleModeContract({ bid: { kind: 'mode', mode: 'prive' }, declarerTeam: ['p1'], defenders: ['p2', 'p3', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: false })).toEqual({
-      p1: -30,
-      p2: 10,
-      p3: 10,
-      p4: 10,
+      p1: -90,
+      p2: 30,
+      p3: 30,
+      p4: 30,
+    });
+    expect(settleModeContract({ bid: { kind: 'mode', mode: 'zwabber-solo' }, declarerTeam: ['p1'], defenders: ['p2', 'p3', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: true })).toEqual({
+      p1: 60,
+      p2: -20,
+      p3: -20,
+      p4: -20,
     });
     expect(settleModeContract({ bid: { kind: 'mode', mode: 'zwabber' }, declarerTeam: ['p1', 'p3'], defenders: ['p2', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: false })).toEqual({
       p1: -5,
@@ -215,6 +221,24 @@ describe('Pandoeren rules foundation', () => {
     ];
 
     expect(calledCardOptions({ callerHand, trumpSuit: 'hearts' }).map((card) => card.id)).toEqual(['hearts-J', 'clubs-A']);
+  });
+
+  it('uses J then 9 as the highest callable cards in the trump suit', () => {
+    expect(calledCardOptions({
+      callerHand: [
+        { suit: 'hearts', rank: '7', id: 'hearts-7' },
+        { suit: 'clubs', rank: 'Q', id: 'clubs-Q' },
+      ],
+      trumpSuit: 'hearts',
+    }).map((card) => card.id)).toContain('hearts-J');
+
+    expect(calledCardOptions({
+      callerHand: [
+        { suit: 'hearts', rank: '7', id: 'hearts-7' },
+        { suit: 'hearts', rank: 'J', id: 'hearts-J' },
+      ],
+      trumpSuit: 'hearts',
+    }).map((card) => card.id)).toEqual(['hearts-9']);
   });
 
   it('detects automatic called-card defeat when called card appears on a non-declarer-led trick', () => {

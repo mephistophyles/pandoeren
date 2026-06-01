@@ -228,6 +228,14 @@ export function settleModeContract(input: { bid: Bid; declarerTeam: string[]; de
   const centsEach = PANDOEREN_MODES.find((mode) => mode.id === modeBid.mode)?.centsEach ?? 0;
   const winners = input.succeeded ? input.declarerTeam : input.defenders;
   const losers = input.succeeded ? input.defenders : input.declarerTeam;
+  const isFullPerOpponentMode = modeBid.mode === 'prive' || modeBid.mode === 'zwabber-solo' || modeBid.mode === 'praatje';
+
+  if (isFullPerOpponentMode) {
+    for (const loser of losers) ledger[loser] -= centsEach * winners.length;
+    for (const winner of winners) ledger[winner] += centsEach * losers.length;
+    return ledger;
+  }
+
   const loserShare = losers.length === 0 ? 0 : centsEach / losers.length;
   const winnerShare = winners.length === 0 ? 0 : centsEach / winners.length;
   for (const loser of losers) ledger[loser] -= loserShare;
