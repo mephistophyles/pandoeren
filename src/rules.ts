@@ -175,6 +175,10 @@ export function settleMisere(input: { miserePlayers: string[]; failedPlayers: st
   return ledger;
 }
 
+export function contractUsesTrump(bid: Bid): boolean {
+  return bid.kind === 'numeric' || !['misere', 'misere-ouvert'].includes(bid.mode);
+}
+
 export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }): Array<{ bid: Bid; label: string }> {
   if (input.current.kind === 'numeric') {
     const nextNumeric = input.current.amount + 10;
