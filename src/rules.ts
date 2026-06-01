@@ -101,9 +101,18 @@ export function cardPoints(card: Card, trumpSuit?: Suit): number {
   return basePoints[card.rank];
 }
 
+export function roemPoints(cards: Card[], trumpSuit?: Suit): number {
+  return SUITS.reduce((total, suit) => {
+    const hasKing = cards.some((card) => card.suit === suit && card.rank === 'K');
+    const hasQueen = cards.some((card) => card.suit === suit && card.rank === 'Q');
+    if (!hasKing || !hasQueen) return total;
+    return total + (trumpSuit === suit ? 40 : 20);
+  }, 0);
+}
+
 export function trickPoints(cards: Card[], trumpSuit?: Suit, isLastTrick = false): number {
   const points = cards.reduce((total, card) => total + cardPoints(card, trumpSuit), 0);
-  return points + (isLastTrick ? 10 : 0);
+  return points + roemPoints(cards, trumpSuit) + (isLastTrick ? 10 : 0);
 }
 
 function cardStrength(card: Card, ledSuit: Suit, trumpSuit?: Suit): number {
@@ -148,6 +157,28 @@ export function legalPlays(hand: Card[], currentTrick: PlayedCard[], trumpSuit?:
   return hand.filter((card) => isLegalPlay(card, hand, currentTrick, trumpSuit));
 }
 
+function hasTrumpAppeared(completedTricks: Array<{ cards: PlayedCard[] }>, currentTrick: PlayedCard[], trumpSuit?: Suit): boolean {
+  if (!trumpSuit) return false;
+  return [...completedTricks.flatMap((trick) => trick.cards), ...currentTrick].some((play) => play.card.suit === trumpSuit);
+}
+
+export function forcedCalledCardPlay(input: {
+  hand: Card[];
+  legalCards: Card[];
+  currentTrick: PlayedCard[];
+  calledCardId?: string;
+  declarerId: string;
+  trumpSuit?: Suit;
+  completedTricks: Array<{ cards: PlayedCard[] }>;
+}): Card | undefined {
+  if (!input.calledCardId || input.currentTrick.length === 0) return undefined;
+  if (input.currentTrick[0].playerId !== input.declarerId) return undefined;
+  if (hasTrumpAppeared(input.completedTricks, [], input.trumpSuit)) return undefined;
+  const calledCard = input.hand.find((card) => card.id === input.calledCardId);
+  if (!calledCard) return undefined;
+  return input.legalCards.some((card) => card.id === calledCard.id) ? calledCard : undefined;
+}
+
 function roundToPandoerenCents(rawCents: number): number {
   const magnitude = Math.abs(rawCents);
   if (magnitude < 3) return 0;
@@ -175,6 +206,23 @@ export function settleMisere(input: { miserePlayers: string[]; failedPlayers: st
   return ledger;
 }
 
+export function settleModeContract(input: { bid: Bid; declarerTeam: string[]; defenders: string[]; allPlayers: string[]; succeeded: boolean }): Record<string, number> {
+  const ledger = Object.fromEntries(input.allPlayers.map((playerId) => [playerId, 0]));
+  if (input.bid.kind !== 'mode') return ledger;
+  const modeBid = input.bid;
+  if (modeBid.mode === 'misere') return settleMisere({ miserePlayers: input.declarerTeam, failedPlayers: input.succeeded ? [] : input.declarerTeam, allPlayers: input.allPlayers });
+
+  const centsEach = PANDOEREN_MODES.find((mode) => mode.id === modeBid.mode)?.centsEach ?? 0;
+  const sign = input.succeeded ? 1 : -1;
+  for (const declarer of input.declarerTeam) {
+    for (const defender of input.defenders) {
+      ledger[declarer] += sign * centsEach;
+      ledger[defender] -= sign * centsEach;
+    }
+  }
+  return ledger;
+}
+
 export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }): Array<{ bid: Bid; label: string }> {
   if (input.current.kind === 'numeric') {
     const nextNumeric = input.current.amount + 10;
@@ -191,6 +239,53 @@ export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }
   if (currentMode.matchable) options.push({ bid: { kind: 'mode', mode: currentMode.id }, label: `match ${currentMode.label}` });
   for (const mode of PANDOEREN_MODES.slice(currentIndex + 1)) options.push({ bid: { kind: 'mode', mode: mode.id }, label: mode.label });
   return options;
+}
+
+export function nextEligibleBidderIndex(input: { currentIndex: number; players: string[]; passedNumeric: string[]; pandoerenOpened: boolean }): number {
+  for (let offset = 1; offset <= input.players.length; offset += 1) {
+    const candidateIndex = (input.currentIndex + offset) % input.players.length;
+    const candidateId = input.players[candidateIndex];
+    if (input.pandoerenOpened || !input.passedNumeric.includes(candidateId)) return candidateIndex;
+  }
+  return (input.currentIndex + 1) % input.players.length;
+}
+
+export function contractUsesTrump(bid: Bid): boolean {
+  return bid.kind === 'numeric' || bid.mode === 'praatje' || bid.mode === 'prive';
+}
+
+export function contractScoresTrickPoints(bid: Bid): boolean {
+  if (bid.kind === 'numeric') return true;
+  return bid.mode === 'praatje';
+}
+
+function candidateStrength(card: Card, trumpSuit?: Suit): number {
+  return trumpSuit === card.suit ? trumpStrength[card.rank] : nonTrumpStrength[card.rank];
+}
+
+export function calledCardOptions(input: { callerHand: Card[]; trumpSuit?: Suit }): Card[] {
+  const deck = createDeck();
+  const handIds = new Set(input.callerHand.map((card) => card.id));
+  const likelyIds = [
+    ...(input.trumpSuit ? [`${input.trumpSuit}-J`, `${input.trumpSuit}-9`] : []),
+    ...SUITS.filter((suit) => suit !== input.trumpSuit).flatMap((suit) => [`${suit}-A`, `${suit}-K`]),
+  ];
+
+  return likelyIds
+    .map((id) => deck.find((card) => card.id === id))
+    .filter((card): card is Card => Boolean(card))
+    .filter((card) => !handIds.has(card.id))
+    .filter((card) => {
+      const suitedCards = input.callerHand.filter((candidate) => candidate.suit === card.suit);
+      if (suitedCards.length === 0) return false;
+      return suitedCards.some((candidate) => candidateStrength(candidate, input.trumpSuit) < candidateStrength(card, input.trumpSuit));
+    });
+}
+
+export function isCalledCardDefeat(input: { currentTrick: PlayedCard[]; calledCardId?: string; declarerId: string }): boolean {
+  if (!input.calledCardId || input.currentTrick.length === 0) return false;
+  if (input.currentTrick[0].playerId === input.declarerId) return false;
+  return input.currentTrick.some((play) => play.card.id === input.calledCardId);
 }
 
 export function bidLabel(bid: Bid): string {
