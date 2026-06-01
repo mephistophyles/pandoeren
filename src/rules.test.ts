@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type Bid,
   type Card,
   type PlayedCard,
   PANDOEREN_MODES,
   calledCardOptions,
   contractScoresTrickPoints,
+  contractUsesCalledCard,
   contractUsesTrump,
   createDeck,
   dealCards,
@@ -17,6 +17,7 @@ import {
   nextEligibleBidderIndex,
   rankHandForDisplay,
   roemPoints,
+  roemTargetAdjustment,
   settleMisere,
   settleModeContract,
   settleStandardDeal,
@@ -44,7 +45,7 @@ describe('Pandoeren rules foundation', () => {
     expect(sorted).toEqual(['clubs-7', 'clubs-A', 'diamonds-10', 'spades-K', 'hearts-A']);
   });
 
-  it('scores trump exceptions, roem, and last trick points', () => {
+  it('keeps card points separate from roem target adjustment', () => {
     expect(trickPoints([
       { suit: 'hearts', rank: 'J', id: 'hearts-J' },
       { suit: 'hearts', rank: '9', id: 'hearts-9' },
@@ -63,7 +64,9 @@ describe('Pandoeren rules foundation', () => {
       { suit: 'hearts', rank: 'Q', id: 'hearts-Q' },
       { suit: 'diamonds', rank: '7', id: 'diamonds-7' },
       { suit: 'spades', rank: '8', id: 'spades-8' },
-    ], 'hearts')).toBe(45);
+    ], 'hearts')).toBe(5);
+    expect(roemTargetAdjustment({ declarerTeam: ['p1', 'p3'], winnerId: 'p1', roem: 20 })).toBe(-20);
+    expect(roemTargetAdjustment({ declarerTeam: ['p1', 'p3'], winnerId: 'p2', roem: 20 })).toBe(20);
   });
 
   it('requires following suit and overtrumping when trumping a non-trump-led trick', () => {
@@ -118,11 +121,17 @@ describe('Pandoeren rules foundation', () => {
     expect(winner).toBe('p4');
   });
 
-  it('settles standard deal by delta divided by ten and rounded to nearest five cents', () => {
-    expect(settleStandardDeal({ declarerTeam: ['p1', 'p3'], defenders: ['p2', 'p4'], score: 120, target: 90 })).toEqual({
+  it('settles standard deal by loser payment and balances uneven teams', () => {
+    expect(settleStandardDeal({ declarerTeam: ['p1', 'p3'], defenders: ['p2', 'p4'], score: 159, target: 110 })).toEqual({
       p1: 5,
       p3: 5,
       p2: -5,
+      p4: -5,
+    });
+    expect(settleStandardDeal({ declarerTeam: ['p1'], defenders: ['p2', 'p3', 'p4'], score: 159, target: 110 })).toEqual({
+      p1: 15,
+      p2: -5,
+      p3: -5,
       p4: -5,
     });
   });
@@ -136,27 +145,33 @@ describe('Pandoeren rules foundation', () => {
     });
   });
 
-  it('settles two simultaneous miseres with one failure and one success as a 20 cent net transfer', () => {
-    expect(settleMisere({ miserePlayers: ['p1', 'p2'], failedPlayers: ['p1'], allPlayers: ['p1', 'p2', 'p3', 'p4'] })).toEqual({
-      p1: -20,
-      p2: 20,
-      p3: 0,
-      p4: 0,
+  it('settles misere as 5 cents against every other player', () => {
+    expect(settleMisere({ miserePlayers: ['p1'], failedPlayers: ['p1'], allPlayers: ['p1', 'p2', 'p3', 'p4'] })).toEqual({
+      p1: -15,
+      p2: 5,
+      p3: 5,
+      p4: 5,
+    });
+    expect(settleMisere({ miserePlayers: ['p1'], failedPlayers: [], allPlayers: ['p1', 'p2', 'p3', 'p4'] })).toEqual({
+      p1: 15,
+      p2: -5,
+      p3: -5,
+      p4: -5,
     });
   });
 
-  it('settles prive as a simple 30 cent payment to or from each opposing player', () => {
+  it('settles prive and zwabber as one payment to or from the opposing side, not once per opponent', () => {
     expect(settleModeContract({ bid: { kind: 'mode', mode: 'prive' }, declarerTeam: ['p1'], defenders: ['p2', 'p3', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: false })).toEqual({
-      p1: -90,
-      p2: 30,
-      p3: 30,
-      p4: 30,
+      p1: -30,
+      p2: 10,
+      p3: 10,
+      p4: 10,
     });
-    expect(settleModeContract({ bid: { kind: 'mode', mode: 'prive' }, declarerTeam: ['p1'], defenders: ['p2', 'p3', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: true })).toEqual({
-      p1: 90,
-      p2: -30,
-      p3: -30,
-      p4: -30,
+    expect(settleModeContract({ bid: { kind: 'mode', mode: 'zwabber' }, declarerTeam: ['p1', 'p3'], defenders: ['p2', 'p4'], allPlayers: ['p1', 'p2', 'p3', 'p4'], succeeded: false })).toEqual({
+      p1: -5,
+      p3: -5,
+      p2: 5,
+      p4: 5,
     });
   });
 
@@ -168,18 +183,23 @@ describe('Pandoeren rules foundation', () => {
     expect(PANDOEREN_MODES.filter((mode) => mode.matchable).map((mode) => mode.id)).toEqual(['misere', 'misere-ouvert', 'praatje']);
   });
 
-  it('skips passed players during numeric bidding but reopens them when pandoeren is active', () => {
+  it('skips passed players during numeric bidding and closes when only the winning bidder remains', () => {
     const players = ['p1', 'p2', 'p3', 'p4'];
 
-    expect(nextEligibleBidderIndex({ currentIndex: 1, players, passedNumeric: ['p3'], pandoerenOpened: false })).toBe(3);
-    expect(nextEligibleBidderIndex({ currentIndex: 1, players, passedNumeric: ['p3'], pandoerenOpened: true })).toBe(2);
+    expect(nextEligibleBidderIndex({ currentIndex: 1, currentBidderId: 'p1', players, passedNumeric: ['p2', 'p3', 'p4'], pandoerenOpened: false })).toBeUndefined();
+    expect(nextEligibleBidderIndex({ currentIndex: 1, currentBidderId: 'p1', players, passedNumeric: ['p3'], pandoerenOpened: false })).toBe(3);
+    expect(nextEligibleBidderIndex({ currentIndex: 1, currentBidderId: 'p1', players, passedNumeric: ['p3'], pandoerenOpened: true })).toBe(2);
   });
 
-  it('classifies no-trump and pass-fail mode contracts', () => {
+  it('classifies no-trump, called-card, and pass-fail mode contracts', () => {
     expect(contractUsesTrump({ kind: 'mode', mode: 'misere' })).toBe(false);
     expect(contractUsesTrump({ kind: 'mode', mode: 'zwabber' })).toBe(false);
     expect(contractUsesTrump({ kind: 'mode', mode: 'zwabber-solo' })).toBe(false);
     expect(contractUsesTrump({ kind: 'numeric', amount: 100 })).toBe(true);
+
+    expect(contractUsesCalledCard({ kind: 'mode', mode: 'misere' })).toBe(false);
+    expect(contractUsesCalledCard({ kind: 'mode', mode: 'zwabber' })).toBe(true);
+    expect(contractUsesCalledCard({ kind: 'numeric', amount: 100 })).toBe(true);
 
     expect(contractScoresTrickPoints({ kind: 'mode', mode: 'misere' })).toBe(false);
     expect(contractScoresTrickPoints({ kind: 'mode', mode: 'zwabber' })).toBe(false);
@@ -187,15 +207,14 @@ describe('Pandoeren rules foundation', () => {
     expect(contractScoresTrickPoints({ kind: 'numeric', amount: 100 })).toBe(true);
   });
 
-  it('limits called-card options to likely legal cards outside the caller hand', () => {
+  it('limits called-card options to the highest actually callable card per suit', () => {
     const callerHand: Card[] = [
       { suit: 'clubs', rank: 'Q', id: 'clubs-Q' },
-      { suit: 'clubs', rank: 'A', id: 'clubs-A' },
       { suit: 'hearts', rank: '7', id: 'hearts-7' },
       { suit: 'spades', rank: 'A', id: 'spades-A' },
     ];
 
-    expect(calledCardOptions({ callerHand, trumpSuit: 'hearts' }).map((card) => card.id)).toEqual(['hearts-J', 'hearts-9', 'clubs-K']);
+    expect(calledCardOptions({ callerHand, trumpSuit: 'hearts' }).map((card) => card.id)).toEqual(['hearts-J', 'clubs-A']);
   });
 
   it('detects automatic called-card defeat when called card appears on a non-declarer-led trick', () => {

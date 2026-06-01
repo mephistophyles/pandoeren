@@ -9,6 +9,7 @@ import {
   bidLabel,
   calledCardOptions,
   contractScoresTrickPoints,
+  contractUsesCalledCard,
   contractUsesTrump,
   createDeck,
   dealCards,
@@ -19,6 +20,8 @@ import {
   legalPlays,
   nextEligibleBidderIndex,
   rankHandForDisplay,
+  roemPoints,
+  roemTargetAdjustment,
   settleModeContract,
   settleStandardDeal,
   shuffleDeck,
@@ -47,8 +50,9 @@ type DealState = {
   declarerTeam: string[];
   defenders: string[];
   currentTrick: PlayedCard[];
-  completedTricks: Array<{ winnerId: string; cards: PlayedCard[]; points: number }>;
+  completedTricks: Array<{ winnerId: string; cards: PlayedCard[]; points: number; roem: number }>;
   teamScores: Record<string, number>;
+  targetAdjustment: number;
   log: string[];
 };
 
@@ -86,6 +90,7 @@ function createDeal(dealerIndex: number): DealState {
     currentTrick: [],
     completedTricks: [],
     teamScores: Object.fromEntries(initialPlayers.map((player) => [player.id, 0])),
+    targetAdjustment: 0,
     log: [`${opener.name} opens bidding at 80.`],
   };
 }
@@ -112,6 +117,7 @@ function App() {
   const currentPlayer = players[deal.turnIndex];
   const declarer = players.find((player) => player.id === deal.currentBidderId) ?? players[0];
   const usesTrump = contractUsesTrump(deal.currentBid);
+  const usesCalledCard = contractUsesCalledCard(deal.currentBid);
   const effectiveTrumpSuit = usesTrump ? deal.trumpSuit : undefined;
   const selectedCalledCard = deal.calledCardId ? createDeck().find((card) => card.id === deal.calledCardId) : undefined;
   const calledOptions = calledCardOptions({ callerHand: deal.hands[deal.currentBidderId] ?? [], trumpSuit: effectiveTrumpSuit });
@@ -150,14 +156,15 @@ function App() {
     setDeal((current) => {
       const passedDeal = [...new Set([...current.passedDeal, currentPlayer.id])];
       const passedNumeric = current.pandoerenOpened ? current.passedNumeric : [...new Set([...current.passedNumeric, currentPlayer.id])];
-      if (passedDeal.length >= 3) {
-        return { ...current, passedDeal, passedNumeric, phase: 'choose-contract', turnIndex: players.findIndex((player) => player.id === current.currentBidderId), log: [`Bidding closes. ${playerName(current.currentBidderId)} wins ${bidLabel(current.currentBid)}.`, ...current.log] };
+      const nextBidderIndex = nextEligibleBidderIndex({ currentIndex: current.turnIndex, currentBidderId: current.currentBidderId, players: players.map((player) => player.id), passedNumeric, pandoerenOpened: current.pandoerenOpened });
+      if (passedDeal.length >= 3 || nextBidderIndex === undefined) {
+        return { ...current, passedDeal, passedNumeric, phase: 'choose-contract', turnIndex: players.findIndex((player) => player.id === current.currentBidderId), log: [`Bidding closes. ${playerName(current.currentBidderId)} wins ${bidLabel(current.currentBid)}.`, `${currentPlayer.name} passes.`, ...current.log] };
       }
       return {
         ...current,
         passedDeal,
         passedNumeric,
-        turnIndex: nextEligibleBidderIndex({ currentIndex: current.turnIndex, players: players.map((player) => player.id), passedNumeric, pandoerenOpened: current.pandoerenOpened }),
+        turnIndex: nextBidderIndex,
         log: [`${currentPlayer.name} passes.`, ...current.log],
       };
     });
@@ -172,14 +179,14 @@ function App() {
         currentBidderId: currentPlayer.id,
         pandoerenOpened,
         passedDeal: [],
-        turnIndex: nextEligibleBidderIndex({ currentIndex: current.turnIndex, players: players.map((player) => player.id), passedNumeric: current.passedNumeric, pandoerenOpened }),
+        turnIndex: nextEligibleBidderIndex({ currentIndex: current.turnIndex, currentBidderId: currentPlayer.id, players: players.map((player) => player.id), passedNumeric: current.passedNumeric, pandoerenOpened }) ?? current.turnIndex,
         log: [`${currentPlayer.name} raises to ${bidLabel(nextBid)}.`, ...current.log],
       };
     });
   }
 
   function beginPlay(): void {
-    const partnerId = deal.calledCardId ? Object.entries(deal.hands).find(([, hand]) => hand.some((card) => card.id === deal.calledCardId))?.[0] : undefined;
+    const partnerId = contractUsesCalledCard(deal.currentBid) && deal.calledCardId ? Object.entries(deal.hands).find(([, hand]) => hand.some((card) => card.id === deal.calledCardId))?.[0] : undefined;
     const declarerTeam = partnerId && partnerId !== deal.currentBidderId ? [deal.currentBidderId, partnerId] : [deal.currentBidderId];
     const defenders = players.map((player) => player.id).filter((id) => !declarerTeam.includes(id));
     setDeal((current) => ({
@@ -220,8 +227,10 @@ function App() {
       const isLastTrick = Object.values(nextHands).every((hand) => hand.length === 0);
       const winnerId = determineTrickWinner(nextTrick, currentEffectiveTrump);
       const points = contractScoresTrickPoints(current.currentBid) ? trickPoints(nextTrick.map((play) => play.card), currentEffectiveTrump, isLastTrick) : 0;
+      const roem = contractScoresTrickPoints(current.currentBid) ? roemPoints(nextTrick.map((play) => play.card), currentEffectiveTrump) : 0;
+      const targetAdjustment = current.targetAdjustment + roemTargetAdjustment({ declarerTeam: current.declarerTeam, winnerId, roem });
       const nextScores = { ...current.teamScores, [winnerId]: current.teamScores[winnerId] + points };
-      const completedTricks = [...current.completedTricks, { winnerId, cards: nextTrick, points }];
+      const completedTricks = [...current.completedTricks, { winnerId, cards: nextTrick, points, roem }];
       const winnerIndex = players.findIndex((player) => player.id === winnerId);
 
       if (isImmediateFailureMode(current.currentBid, current.declarerTeam, winnerId)) {
@@ -240,7 +249,7 @@ function App() {
 
       if (isLastTrick) {
         const declarerScore = current.declarerTeam.reduce((total, playerId) => total + nextScores[playerId], 0);
-        const target = current.currentBid.kind === 'numeric' ? current.currentBid.amount : 0;
+        const target = current.currentBid.kind === 'numeric' ? current.currentBid.amount + targetAdjustment : 0;
         const ledger = current.currentBid.kind === 'numeric'
           ? settleStandardDeal({ declarerTeam: current.declarerTeam, defenders: current.defenders, score: declarerScore, target })
           : settleModeContract({ bid: current.currentBid, declarerTeam: current.declarerTeam, defenders: current.defenders, allPlayers: players.map((player) => player.id), succeeded: true });
@@ -251,8 +260,9 @@ function App() {
           currentTrick: [],
           completedTricks,
           teamScores: nextScores,
+          targetAdjustment,
           phase: 'settled',
-          log: [`Deal settled. Declarer side scored ${declarerScore} against ${target}.`, `${playerName(winnerId)} wins final trick for ${points} points.`, ...current.log],
+          log: [`Deal settled. Declarer side scored ${declarerScore} against ${target}.`, `${playerName(winnerId)} wins final trick${points ? ` for ${points} points` : ''}.`, ...(roem ? [`Roem in trick adjusts target by ${roemTargetAdjustment({ declarerTeam: current.declarerTeam, winnerId, roem })}.`] : []), ...current.log],
         };
       }
 
@@ -262,8 +272,9 @@ function App() {
         currentTrick: [],
         completedTricks,
         teamScores: nextScores,
+        targetAdjustment,
         turnIndex: winnerIndex,
-        log: [`${playerName(winnerId)} wins trick ${completedTricks.length} for ${points} points.`, ...current.log],
+        log: [`${playerName(winnerId)} wins trick ${completedTricks.length}${points ? ` for ${points} points` : ''}.`, ...(roem ? [`Roem in trick adjusts target by ${roemTargetAdjustment({ declarerTeam: current.declarerTeam, winnerId, roem })}.`] : []), ...current.log],
       };
     });
   }
@@ -302,8 +313,8 @@ function App() {
           <p><strong>{bidLabel(deal.currentBid)}</strong> by {declarer.name}</p>
           <p>Phase: {deal.phase}</p>
           <p>Trump: {usesTrump ? (deal.trumpSuit ?? 'not chosen') : 'none'}</p>
-          <p>Called card: {selectedCalledCard ? cardLabel(selectedCalledCard) : 'not chosen'}</p>
-          {deal.phase === 'bidding' && (
+          <p>Called card: {usesCalledCard ? (selectedCalledCard ? cardLabel(selectedCalledCard) : 'not chosen') : 'none'}</p>
+{deal.phase === 'bidding' && (
             <div className="actions">
               <button onClick={passBid} type="button">Pass</button>
               {raiseOptions.slice(0, 8).map((option) => (
@@ -322,14 +333,16 @@ function App() {
                   </select>
                 </label>
               )}
-              <label>
-                Called card
-                <select value={deal.calledCardId ?? ''} onChange={(event) => setDeal((current) => ({ ...current, calledCardId: event.target.value }))}>
-                  <option value="">No called card yet</option>
-                  {calledOptions.map((card) => <option key={card.id} value={card.id}>{cardLabel(card)}</option>)}
-                </select>
-              </label>
-              <button disabled={deal.currentBid.kind === 'numeric' && ((usesTrump && !deal.trumpSuit) || !deal.calledCardId)} onClick={beginPlay} type="button">Start play</button>
+              {usesCalledCard && (
+                <label>
+                  Called card
+                  <select value={deal.calledCardId ?? ''} onChange={(event) => setDeal((current) => ({ ...current, calledCardId: event.target.value }))}>
+                    <option value="">No called card yet</option>
+                    {calledOptions.map((card) => <option key={card.id} value={card.id}>{cardLabel(card)}</option>)}
+                  </select>
+                </label>
+              )}
+              <button disabled={(usesTrump && !deal.trumpSuit) || (usesCalledCard && !deal.calledCardId)} onClick={beginPlay} type="button">Start play</button>
             </div>
           )}
           {deal.phase === 'settled' && <button onClick={() => startNewDeal()} type="button">Next deal</button>}

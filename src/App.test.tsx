@@ -38,5 +38,19 @@ describe('Hot-seat app', () => {
     fireEvent.click(screen.getByRole('button', { name: /pass/i }));
 
     expect(screen.queryByLabelText(/trump/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/called card/i)).toBeInTheDocument();
+  });
+
+  it('does not ask misere players to choose trump or called card', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^misere$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pass/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pass/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pass/i }));
+
+    expect(screen.queryByLabelText(/trump/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/called card/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start play/i })).toBeEnabled();
   });
 });

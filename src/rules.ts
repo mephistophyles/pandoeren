@@ -112,7 +112,12 @@ export function roemPoints(cards: Card[], trumpSuit?: Suit): number {
 
 export function trickPoints(cards: Card[], trumpSuit?: Suit, isLastTrick = false): number {
   const points = cards.reduce((total, card) => total + cardPoints(card, trumpSuit), 0);
-  return points + roemPoints(cards, trumpSuit) + (isLastTrick ? 10 : 0);
+  return points + (isLastTrick ? 10 : 0);
+}
+
+export function roemTargetAdjustment(input: { declarerTeam: string[]; winnerId: string; roem: number }): number {
+  if (input.roem === 0) return 0;
+  return input.declarerTeam.includes(input.winnerId) ? -input.roem : input.roem;
 }
 
 function cardStrength(card: Card, ledSuit: Suit, trumpSuit?: Suit): number {
@@ -188,9 +193,15 @@ function roundToPandoerenCents(rawCents: number): number {
 export function settleStandardDeal(input: { declarerTeam: string[]; defenders: string[]; score: number; target: number }): Record<string, number> {
   const cents = roundToPandoerenCents((input.score - input.target) / 10);
   const ledger = Object.fromEntries([...input.declarerTeam, ...input.defenders].map((playerId) => [playerId, 0]));
+  if (cents === 0) return ledger;
 
-  for (const playerId of input.declarerTeam) ledger[playerId] += cents;
-  for (const playerId of input.defenders) ledger[playerId] -= cents;
+  const winners = cents > 0 ? input.declarerTeam : input.defenders;
+  const losers = cents > 0 ? input.defenders : input.declarerTeam;
+  const payment = Math.abs(cents);
+  const totalPayment = payment * losers.length;
+  for (const playerId of losers) ledger[playerId] -= payment;
+  const winnerShare = totalPayment / winners.length;
+  for (const playerId of winners) ledger[playerId] += winnerShare;
   return ledger;
 }
 
@@ -210,16 +221,17 @@ export function settleModeContract(input: { bid: Bid; declarerTeam: string[]; de
   const ledger = Object.fromEntries(input.allPlayers.map((playerId) => [playerId, 0]));
   if (input.bid.kind !== 'mode') return ledger;
   const modeBid = input.bid;
-  if (modeBid.mode === 'misere') return settleMisere({ miserePlayers: input.declarerTeam, failedPlayers: input.succeeded ? [] : input.declarerTeam, allPlayers: input.allPlayers });
+  if (modeBid.mode === 'misere' || modeBid.mode === 'misere-ouvert') {
+    return settleMisere({ miserePlayers: input.declarerTeam, failedPlayers: input.succeeded ? [] : input.declarerTeam, allPlayers: input.allPlayers });
+  }
 
   const centsEach = PANDOEREN_MODES.find((mode) => mode.id === modeBid.mode)?.centsEach ?? 0;
-  const sign = input.succeeded ? 1 : -1;
-  for (const declarer of input.declarerTeam) {
-    for (const defender of input.defenders) {
-      ledger[declarer] += sign * centsEach;
-      ledger[defender] -= sign * centsEach;
-    }
-  }
+  const winners = input.succeeded ? input.declarerTeam : input.defenders;
+  const losers = input.succeeded ? input.defenders : input.declarerTeam;
+  const loserShare = losers.length === 0 ? 0 : centsEach / losers.length;
+  const winnerShare = winners.length === 0 ? 0 : centsEach / winners.length;
+  for (const loser of losers) ledger[loser] -= loserShare;
+  for (const winner of winners) ledger[winner] += winnerShare;
   return ledger;
 }
 
@@ -241,17 +253,24 @@ export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }
   return options;
 }
 
-export function nextEligibleBidderIndex(input: { currentIndex: number; players: string[]; passedNumeric: string[]; pandoerenOpened: boolean }): number {
+export function nextEligibleBidderIndex(input: { currentIndex: number; currentBidderId: string; players: string[]; passedNumeric: string[]; pandoerenOpened: boolean }): number | undefined {
   for (let offset = 1; offset <= input.players.length; offset += 1) {
     const candidateIndex = (input.currentIndex + offset) % input.players.length;
     const candidateId = input.players[candidateIndex];
-    if (input.pandoerenOpened || !input.passedNumeric.includes(candidateId)) return candidateIndex;
+    if (input.pandoerenOpened || !input.passedNumeric.includes(candidateId)) {
+      return candidateId === input.currentBidderId && !input.pandoerenOpened ? undefined : candidateIndex;
+    }
   }
-  return (input.currentIndex + 1) % input.players.length;
+  return undefined;
 }
 
 export function contractUsesTrump(bid: Bid): boolean {
   return bid.kind === 'numeric' || bid.mode === 'praatje' || bid.mode === 'prive';
+}
+
+export function contractUsesCalledCard(bid: Bid): boolean {
+  if (bid.kind === 'numeric') return true;
+  return bid.mode === 'zwabber';
 }
 
 export function contractScoresTrickPoints(bid: Bid): boolean {
@@ -266,20 +285,24 @@ function candidateStrength(card: Card, trumpSuit?: Suit): number {
 export function calledCardOptions(input: { callerHand: Card[]; trumpSuit?: Suit }): Card[] {
   const deck = createDeck();
   const handIds = new Set(input.callerHand.map((card) => card.id));
-  const likelyIds = [
-    ...(input.trumpSuit ? [`${input.trumpSuit}-J`, `${input.trumpSuit}-9`] : []),
-    ...SUITS.filter((suit) => suit !== input.trumpSuit).flatMap((suit) => [`${suit}-A`, `${suit}-K`]),
-  ];
+  const candidatesBySuit = SUITS.map((suit) => {
+    const ranks: Rank[] = suit === input.trumpSuit ? ['J', '9'] : ['A', 'K'];
+    return ranks
+      .map((rank) => deck.find((card) => card.suit === suit && card.rank === rank))
+      .filter((card): card is Card => Boolean(card))
+      .find((card) => {
+        if (handIds.has(card.id)) return false;
+        const suitedCards = input.callerHand.filter((candidate) => candidate.suit === card.suit);
+        if (suitedCards.length === 0) return false;
+        return suitedCards.some((candidate) => candidateStrength(candidate, input.trumpSuit) < candidateStrength(card, input.trumpSuit));
+      });
+  });
 
-  return likelyIds
-    .map((id) => deck.find((card) => card.id === id))
-    .filter((card): card is Card => Boolean(card))
-    .filter((card) => !handIds.has(card.id))
-    .filter((card) => {
-      const suitedCards = input.callerHand.filter((candidate) => candidate.suit === card.suit);
-      if (suitedCards.length === 0) return false;
-      return suitedCards.some((candidate) => candidateStrength(candidate, input.trumpSuit) < candidateStrength(card, input.trumpSuit));
-    });
+  return candidatesBySuit.filter((card): card is Card => Boolean(card)).sort((left, right) => {
+    if (left.suit === input.trumpSuit && right.suit !== input.trumpSuit) return -1;
+    if (right.suit === input.trumpSuit && left.suit !== input.trumpSuit) return 1;
+    return SUITS.indexOf(left.suit) - SUITS.indexOf(right.suit);
+  });
 }
 
 export function isCalledCardDefeat(input: { currentTrick: PlayedCard[]; calledCardId?: string; declarerId: string }): boolean {
