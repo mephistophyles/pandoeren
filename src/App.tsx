@@ -97,6 +97,7 @@ function App() {
   const [deal, setDeal] = useState<DealState>(() => createDeal(0));
   const currentPlayer = players[deal.turnIndex];
   const declarer = players.find((player) => player.id === deal.currentBidderId) ?? players[0];
+  const selectedCalledCard = deal.calledCardId ? createDeck().find((card) => card.id === deal.calledCardId) : undefined;
   const playableCards = useMemo(() => legalPlays(deal.hands[currentPlayer.id] ?? [], deal.currentTrick, deal.trumpSuit), [deal, currentPlayer.id]);
 
   function appendLog(message: string): void {
@@ -225,6 +226,8 @@ function App() {
           <h2>Current bid</h2>
           <p><strong>{bidLabel(deal.currentBid)}</strong> by {declarer.name}</p>
           <p>Phase: {deal.phase}</p>
+          <p>Trump: {deal.trumpSuit ?? 'not chosen'}</p>
+          <p>Called card: {selectedCalledCard ? cardLabel(selectedCalledCard) : 'not chosen'}</p>
           {deal.phase === 'bidding' && (
             <div className="actions">
               <button onClick={passBid} type="button">Pass</button>
