@@ -175,6 +175,19 @@ export function settleMisere(input: { miserePlayers: string[]; failedPlayers: st
   return ledger;
 }
 
+export function nextEligibleBidderIndex(input: { currentIndex: number; playerIds: string[]; passedNumeric: string[]; pandoerenOpened: boolean }): number {
+  if (input.playerIds.length === 0) throw new Error('Cannot select a bidder without players');
+
+  const passedNumeric = new Set(input.passedNumeric);
+  for (let offset = 1; offset <= input.playerIds.length; offset += 1) {
+    const candidateIndex = (input.currentIndex + offset) % input.playerIds.length;
+    const candidateId = input.playerIds[candidateIndex];
+    if (input.pandoerenOpened || !passedNumeric.has(candidateId)) return candidateIndex;
+  }
+
+  return input.currentIndex;
+}
+
 export function eligibleRaises(input: { current: Bid; pandoerenOpened: boolean }): Array<{ bid: Bid; label: string }> {
   if (input.current.kind === 'numeric') {
     const nextNumeric = input.current.amount + 10;

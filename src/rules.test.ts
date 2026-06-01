@@ -11,6 +11,7 @@ import {
   rankHandForDisplay,
   settleMisere,
   settleStandardDeal,
+  nextEligibleBidderIndex,
   trickPoints,
 } from './rules';
 
@@ -102,5 +103,21 @@ describe('Pandoeren rules foundation', () => {
     expect(options.map((option) => option.label)).toContain('match misere');
     expect(options.map((option) => option.label)).toContain('zwabber');
     expect(PANDOEREN_MODES.filter((mode) => mode.matchable).map((mode) => mode.id)).toEqual(['misere', 'misere-ouvert', 'praatje']);
+  });
+
+  it('skips players who already passed during numeric bidding until pandoeren opens', () => {
+    expect(nextEligibleBidderIndex({
+      currentIndex: 0,
+      playerIds: ['p1', 'p2', 'p3', 'p4'],
+      passedNumeric: ['p2', 'p3'],
+      pandoerenOpened: false,
+    })).toBe(3);
+
+    expect(nextEligibleBidderIndex({
+      currentIndex: 0,
+      playerIds: ['p1', 'p2', 'p3', 'p4'],
+      passedNumeric: ['p2', 'p3'],
+      pandoerenOpened: true,
+    })).toBe(1);
   });
 });

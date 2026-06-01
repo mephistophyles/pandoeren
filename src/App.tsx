@@ -12,6 +12,7 @@ import {
   determineTrickWinner,
   eligibleRaises,
   legalPlays,
+  nextEligibleBidderIndex,
   rankHandForDisplay,
   settleStandardDeal,
   shuffleDeck,
@@ -114,20 +115,37 @@ function App() {
       if (passedDeal.length >= 3) {
         return { ...current, passedDeal, passedNumeric, phase: 'choose-contract', turnIndex: players.findIndex((player) => player.id === current.currentBidderId), log: [`Bidding closes. ${playerName(current.currentBidderId)} wins ${bidLabel(current.currentBid)}.`, ...current.log] };
       }
-      return { ...current, passedDeal, passedNumeric, turnIndex: nextIndex(current.turnIndex), log: [`${currentPlayer.name} passes.`, ...current.log] };
+      const nextTurnIndex = nextEligibleBidderIndex({
+        currentIndex: current.turnIndex,
+        playerIds: players.map((player) => player.id),
+        passedNumeric,
+        pandoerenOpened: current.pandoerenOpened,
+      });
+      if (players[nextTurnIndex]?.id === current.currentBidderId) {
+        return { ...current, passedDeal, passedNumeric, phase: 'choose-contract', turnIndex: nextTurnIndex, log: [`Bidding closes. ${playerName(current.currentBidderId)} wins ${bidLabel(current.currentBid)}.`, ...current.log] };
+      }
+      return { ...current, passedDeal, passedNumeric, turnIndex: nextTurnIndex, log: [`${currentPlayer.name} passes.`, ...current.log] };
     });
   }
 
   function raiseBid(nextBid: Bid): void {
-    setDeal((current) => ({
-      ...current,
-      currentBid: nextBid,
-      currentBidderId: currentPlayer.id,
-      pandoerenOpened: current.pandoerenOpened || nextBid.kind === 'mode',
-      passedDeal: [],
-      turnIndex: nextIndex(current.turnIndex),
-      log: [`${currentPlayer.name} raises to ${bidLabel(nextBid)}.`, ...current.log],
-    }));
+    setDeal((current) => {
+      const pandoerenOpened = current.pandoerenOpened || nextBid.kind === 'mode';
+      return {
+        ...current,
+        currentBid: nextBid,
+        currentBidderId: currentPlayer.id,
+        pandoerenOpened,
+        passedDeal: [],
+        turnIndex: nextEligibleBidderIndex({
+          currentIndex: current.turnIndex,
+          playerIds: players.map((player) => player.id),
+          passedNumeric: current.passedNumeric,
+          pandoerenOpened,
+        }),
+        log: [`${currentPlayer.name} raises to ${bidLabel(nextBid)}.`, ...current.log],
+      };
+    });
   }
 
   function beginPlay(): void {
