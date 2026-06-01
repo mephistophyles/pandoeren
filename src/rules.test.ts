@@ -21,6 +21,7 @@ import {
   settleMisere,
   settleModeContract,
   settleStandardDeal,
+  summarizeOpenRoem,
   trickPoints,
 } from './rules';
 
@@ -83,7 +84,7 @@ describe('Pandoeren rules foundation', () => {
     expect(isLegalPlay(hand[1], hand, currentTrick, 'hearts')).toBe(true);
   });
 
-  it('forces the called card when declarer leads before any trump was played', () => {
+  it('forces the called card only when declarer explicitly leads the called suit before trump was played', () => {
     const hand: Card[] = [
       { suit: 'clubs', rank: 'A', id: 'clubs-A' },
       { suit: 'spades', rank: '7', id: 'spades-7' },
@@ -92,7 +93,7 @@ describe('Pandoeren rules foundation', () => {
     expect(forcedCalledCardPlay({
       hand,
       legalCards: hand,
-      currentTrick: [{ playerId: 'p1', card: { suit: 'diamonds', rank: '7', id: 'diamonds-7' } }],
+      currentTrick: [{ playerId: 'p1', card: { suit: 'clubs', rank: '7', id: 'clubs-7' } }],
       calledCardId: 'clubs-A',
       declarerId: 'p1',
       trumpSuit: 'hearts',
@@ -102,7 +103,17 @@ describe('Pandoeren rules foundation', () => {
     expect(forcedCalledCardPlay({
       hand,
       legalCards: hand,
-      currentTrick: [{ playerId: 'p2', card: { suit: 'diamonds', rank: '7', id: 'diamonds-7' } }],
+      currentTrick: [{ playerId: 'p1', card: { suit: 'diamonds', rank: '7', id: 'diamonds-7' } }],
+      calledCardId: 'clubs-A',
+      declarerId: 'p1',
+      trumpSuit: 'hearts',
+      completedTricks: [],
+    })).toBeUndefined();
+
+    expect(forcedCalledCardPlay({
+      hand,
+      legalCards: hand,
+      currentTrick: [{ playerId: 'p2', card: { suit: 'clubs', rank: '7', id: 'clubs-7' } }],
       calledCardId: 'clubs-A',
       declarerId: 'p1',
       trumpSuit: 'hearts',
@@ -221,6 +232,42 @@ describe('Pandoeren rules foundation', () => {
     ];
 
     expect(calledCardOptions({ callerHand, trumpSuit: 'hearts' }).map((card) => card.id)).toEqual(['hearts-J', 'clubs-A']);
+  });
+
+  it('automatically summarizes verifiable open roem from actual cards and exposes the meld cards', () => {
+    const hand: Card[] = [
+      { suit: 'spades', rank: '9', id: 'spades-9' },
+      { suit: 'spades', rank: '10', id: 'spades-10' },
+      { suit: 'spades', rank: 'J', id: 'spades-J' },
+      { suit: 'hearts', rank: 'K', id: 'hearts-K' },
+      { suit: 'hearts', rank: 'Q', id: 'hearts-Q' },
+      { suit: 'clubs', rank: '7', id: 'clubs-7' },
+    ];
+
+    const summary = summarizeOpenRoem([{ playerId: 'p1', hand }], 'hearts');
+
+    expect(summary.total).toBe(60);
+    expect(summary.declarations).toEqual([
+      {
+        playerId: 'p1',
+        points: 20,
+        label: 'sequence',
+        cards: [
+          { suit: 'spades', rank: '9', id: 'spades-9' },
+          { suit: 'spades', rank: '10', id: 'spades-10' },
+          { suit: 'spades', rank: 'J', id: 'spades-J' },
+        ],
+      },
+      {
+        playerId: 'p1',
+        points: 40,
+        label: 'trump marriage',
+        cards: [
+          { suit: 'hearts', rank: 'K', id: 'hearts-K' },
+          { suit: 'hearts', rank: 'Q', id: 'hearts-Q' },
+        ],
+      },
+    ]);
   });
 
   it('uses J then 9 as the highest callable cards in the trump suit', () => {

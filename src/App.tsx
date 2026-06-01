@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   type Bid,
   type Card,
+  type OpenRoemDeclaration,
   type PlayedCard,
   type Suit,
   PANDOEREN_MODES,
@@ -25,6 +26,7 @@ import {
   settleModeContract,
   settleStandardDeal,
   shuffleDeck,
+  summarizeOpenRoem,
   trickPoints,
 } from './rules';
 import './styles.css';
@@ -48,6 +50,7 @@ type DealState = {
   trumpSuit?: Suit;
   calledCardId?: string;
   openRoem: number;
+  openRoemDeclarations: OpenRoemDeclaration[];
   declarerTeam: string[];
   defenders: string[];
   currentTrick: PlayedCard[];
@@ -87,6 +90,7 @@ function createDeal(dealerIndex: number): DealState {
     passedDeal: [],
     pandoerenOpened: false,
     openRoem: 0,
+    openRoemDeclarations: [],
     declarerTeam: [opener.id],
     defenders: initialPlayers.filter((player) => player.id !== opener.id).map((player) => player.id),
     currentTrick: [],
@@ -192,7 +196,10 @@ function App() {
     const declarerTeam = partnerId && partnerId !== deal.currentBidderId ? [deal.currentBidderId, partnerId] : [deal.currentBidderId];
     const defenders = players.map((player) => player.id).filter((id) => !declarerTeam.includes(id));
     setDeal((current) => {
-      const openRoemAdjustment = contractScoresTrickPoints(current.currentBid) ? -current.openRoem : 0;
+      const openRoemSummary = contractScoresTrickPoints(current.currentBid)
+        ? summarizeOpenRoem(declarerTeam.map((playerId) => ({ playerId, hand: current.hands[playerId] ?? [] })), contractUsesTrump(current.currentBid) ? current.trumpSuit : undefined)
+        : { total: 0, declarations: [] };
+      const openRoemAdjustment = contractScoresTrickPoints(current.currentBid) ? -openRoemSummary.total : 0;
       return {
         ...current,
         phase: 'play',
@@ -200,10 +207,12 @@ function App() {
         turnIndex: players.findIndex((player) => player.id === current.currentBidderId),
         declarerTeam,
         defenders,
+        openRoem: openRoemSummary.total,
+        openRoemDeclarations: openRoemSummary.declarations,
         targetAdjustment: openRoemAdjustment,
         log: [
           `${playerName(current.currentBidderId)} starts play${partnerId ? ` with ${playerName(partnerId)} as maat` : ''}.`,
-          ...(current.openRoem ? [`Open roem declared by playing team: ${current.openRoem}; adjusts target by ${openRoemAdjustment}.`] : []),
+          ...(openRoemSummary.declarations.length ? [`Open roem declared by playing team: ${openRoemSummary.total}; adjusts target by ${openRoemAdjustment}. ${openRoemSummary.declarations.map((declaration) => `${playerName(declaration.playerId)} shows ${declaration.cards.map(cardLabel).join('-')} (${declaration.points})`).join('; ')}.`] : []),
           ...current.log,
         ],
       };
@@ -325,6 +334,15 @@ function App() {
           <p>Trump: {usesTrump ? (deal.trumpSuit ?? 'not chosen') : 'none'}</p>
           <p>Called card: {usesCalledCard ? (selectedCalledCard ? cardLabel(selectedCalledCard) : 'not chosen') : 'none'}</p>
           <p>Open roem: {deal.openRoem}</p>
+          {deal.openRoemDeclarations.length > 0 && (
+            <ul className="roem-list" aria-label="Open roem cards">
+              {deal.openRoemDeclarations.map((declaration, index) => (
+                <li key={`${declaration.playerId}-${declaration.label}-${index}`}>
+                  {playerName(declaration.playerId)}: {declaration.cards.map(cardLabel).join(' ')} — {declaration.label}, {declaration.points}
+                </li>
+              ))}
+            </ul>
+          )}
           <p>Bid adjustment: {deal.targetAdjustment}</p>
           {deal.phase === 'bidding' && (
             <div className="actions">
@@ -342,18 +360,6 @@ function App() {
                   <select value={deal.trumpSuit ?? ''} onChange={(event) => setDeal((current) => ({ ...current, trumpSuit: event.target.value as Suit }))}>
                     <option value="">Choose suit</option>
                     {SUITS.map((suit) => <option key={suit} value={suit}>{suit}</option>)}
-                  </select>
-                </label>
-              )}
-              {contractScoresTrickPoints(deal.currentBid) && (
-                <label>
-                  Open roem
-                  <select value={deal.openRoem} onChange={(event) => setDeal((current) => ({ ...current, openRoem: Number(event.target.value) }))}>
-                    <option value={0}>None</option>
-                    <option value={20}>20</option>
-                    <option value={40}>40</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
                   </select>
                 </label>
               )}

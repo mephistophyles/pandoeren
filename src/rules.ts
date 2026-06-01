@@ -12,6 +12,13 @@ export type PlayedCard = {
   card: Card;
 };
 
+export type OpenRoemDeclaration = {
+  playerId: string;
+  points: number;
+  label: string;
+  cards: Card[];
+};
+
 export type PandoerenModeId = 'misere' | 'zwabber' | 'misere-ouvert' | 'zwabber-solo' | 'praatje' | 'prive';
 
 export type Bid =
@@ -110,6 +117,58 @@ export function roemPoints(cards: Card[], trumpSuit?: Suit): number {
   }, 0);
 }
 
+const sequenceRanks: Rank[] = ['7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+function sequencePoints(length: number): number {
+  if (length >= 5) return 100;
+  if (length === 4) return 50;
+  if (length === 3) return 20;
+  return 0;
+}
+
+export function summarizeOpenRoem(players: Array<{ playerId: string; hand: Card[] }>, trumpSuit?: Suit): { total: number; declarations: OpenRoemDeclaration[] } {
+  const declarations = players.flatMap(({ playerId, hand }) => {
+    const handDeclarations: OpenRoemDeclaration[] = [];
+    for (const suit of SUITS) {
+      const suited = sequenceRanks
+        .map((rank) => hand.find((card) => card.suit === suit && card.rank === rank))
+        .map((card, index) => ({ card, index }))
+        .filter((entry): entry is { card: Card; index: number } => Boolean(entry.card));
+      let run: Card[] = [];
+      let previousIndex: number | undefined;
+      const flushRun = () => {
+        const points = sequencePoints(run.length);
+        if (points) handDeclarations.push({ playerId, points, label: run.length === 3 ? 'sequence' : `${run.length}-card sequence`, cards: run });
+      };
+
+      for (const entry of suited) {
+        if (previousIndex === undefined || entry.index === previousIndex + 1) {
+          run = [...run, entry.card];
+        } else {
+          flushRun();
+          run = [entry.card];
+        }
+        previousIndex = entry.index;
+      }
+      flushRun();
+
+      const king = hand.find((card) => card.suit === suit && card.rank === 'K');
+      const queen = hand.find((card) => card.suit === suit && card.rank === 'Q');
+      if (king && queen) {
+        handDeclarations.push({
+          playerId,
+          points: trumpSuit === suit ? 40 : 20,
+          label: trumpSuit === suit ? 'trump marriage' : 'marriage',
+          cards: [king, queen],
+        });
+      }
+    }
+    return handDeclarations;
+  });
+
+  return { total: declarations.reduce((total, declaration) => total + declaration.points, 0), declarations };
+}
+
 export function trickPoints(cards: Card[], trumpSuit?: Suit, isLastTrick = false): number {
   const points = cards.reduce((total, card) => total + cardPoints(card, trumpSuit), 0);
   return points + (isLastTrick ? 10 : 0);
@@ -181,6 +240,7 @@ export function forcedCalledCardPlay(input: {
   if (hasTrumpAppeared(input.completedTricks, [], input.trumpSuit)) return undefined;
   const calledCard = input.hand.find((card) => card.id === input.calledCardId);
   if (!calledCard) return undefined;
+  if (input.currentTrick[0].card.suit !== calledCard.suit) return undefined;
   return input.legalCards.some((card) => card.id === calledCard.id) ? calledCard : undefined;
 }
 
