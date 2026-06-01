@@ -7,6 +7,7 @@ import {
   PANDOEREN_MODES,
   SUITS,
   bidLabel,
+  contractUsesTrump,
   createDeck,
   dealCards,
   determineTrickWinner,
@@ -97,7 +98,8 @@ function App() {
   const [deal, setDeal] = useState<DealState>(() => createDeal(0));
   const currentPlayer = players[deal.turnIndex];
   const declarer = players.find((player) => player.id === deal.currentBidderId) ?? players[0];
-  const playableCards = useMemo(() => legalPlays(deal.hands[currentPlayer.id] ?? [], deal.currentTrick, deal.trumpSuit), [deal, currentPlayer.id]);
+  const usesTrump = contractUsesTrump(deal.currentBid);
+  const playableCards = useMemo(() => legalPlays(deal.hands[currentPlayer.id] ?? [], deal.currentTrick, usesTrump ? deal.trumpSuit : undefined), [deal, currentPlayer.id, usesTrump]);
 
   function appendLog(message: string): void {
     setDeal((current) => ({ ...current, log: [message, ...current.log].slice(0, 12) }));
@@ -137,6 +139,7 @@ function App() {
     setDeal((current) => ({
       ...current,
       phase: 'play',
+      trumpSuit: contractUsesTrump(current.currentBid) ? current.trumpSuit : undefined,
       turnIndex: players.findIndex((player) => player.id === current.currentBidderId),
       declarerTeam,
       defenders,
@@ -235,13 +238,15 @@ function App() {
           )}
           {deal.phase === 'choose-contract' && (
             <div className="contract-form">
-              <label>
-                Trump
-                <select value={deal.trumpSuit ?? ''} onChange={(event) => setDeal((current) => ({ ...current, trumpSuit: event.target.value as Suit }))}>
-                  <option value="">Choose suit</option>
-                  {SUITS.map((suit) => <option key={suit} value={suit}>{suit}</option>)}
-                </select>
-              </label>
+              {usesTrump && (
+                <label>
+                  Trump
+                  <select value={deal.trumpSuit ?? ''} onChange={(event) => setDeal((current) => ({ ...current, trumpSuit: event.target.value as Suit }))}>
+                    <option value="">Choose suit</option>
+                    {SUITS.map((suit) => <option key={suit} value={suit}>{suit}</option>)}
+                  </select>
+                </label>
+              )}
               <label>
                 Called card
                 <select value={deal.calledCardId ?? ''} onChange={(event) => setDeal((current) => ({ ...current, calledCardId: event.target.value }))}>
@@ -249,7 +254,7 @@ function App() {
                   {createDeck().map((card) => <option key={card.id} value={card.id}>{cardLabel(card)}</option>)}
                 </select>
               </label>
-              <button disabled={deal.currentBid.kind === 'numeric' && (!deal.trumpSuit || !deal.calledCardId)} onClick={beginPlay} type="button">Start play</button>
+              <button disabled={deal.currentBid.kind === 'numeric' && ((usesTrump && !deal.trumpSuit) || !deal.calledCardId)} onClick={beginPlay} type="button">Start play</button>
             </div>
           )}
           {deal.phase === 'settled' && <button onClick={() => startNewDeal()} type="button">Next deal</button>}

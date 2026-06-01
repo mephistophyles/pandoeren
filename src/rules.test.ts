@@ -3,6 +3,7 @@ import {
   type Card,
   type PlayedCard,
   PANDOEREN_MODES,
+  contractUsesTrump,
   createDeck,
   dealCards,
   determineTrickWinner,
@@ -102,5 +103,12 @@ describe('Pandoeren rules foundation', () => {
     expect(options.map((option) => option.label)).toContain('match misere');
     expect(options.map((option) => option.label)).toContain('zwabber');
     expect(PANDOEREN_MODES.filter((mode) => mode.matchable).map((mode) => mode.id)).toEqual(['misere', 'misere-ouvert', 'praatje']);
+  });
+
+  it('treats misere contracts as no-trump contracts', () => {
+    expect(contractUsesTrump({ kind: 'numeric', amount: 100 })).toBe(true);
+    expect(contractUsesTrump({ kind: 'mode', mode: 'misere' })).toBe(false);
+    expect(contractUsesTrump({ kind: 'mode', mode: 'misere-ouvert' })).toBe(false);
+    expect(contractUsesTrump({ kind: 'mode', mode: 'praatje' })).toBe(true);
   });
 });
